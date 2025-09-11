@@ -1,0 +1,5 @@
+要求仕様：実行環境
+- Mac 上のターミナルで python script_filename.py として実行できるとともに、Streamlit でも streamlit run script_filename.py として実行できるようにする。
+- Mac 上のターミナルで実行する際には、ヘルプオプションで usage を表示するようにする。
+
+
