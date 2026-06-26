@@ -15,7 +15,7 @@ BASE_COLUMN_ORDER = [
     "USER_FIELD_01", "USER_FIELD_02", "USER_FIELD_03",
     "業務内容1", "業務内容2", "業務内容3", "業務内容4", "業務内容5"
 ]
-UNIT_COL = "UNIT"
+UNIT_COL = "WBS要素(代入)"
 EFFORT_COL = "作業時間(h)"
 
 
@@ -110,7 +110,7 @@ def aggregate_data(df, group_cols, effort_col):
 
 def aggregate_by_year_month_person(df, effort_col='作業時間(h)'):
     """
-    データを年、月、従業員名、USER_FIELD_01/02/03、UNIT、MODULE、業務内容1-10で集計
+    データを年、月、従業員名、USER_FIELD_01/02/03、WBS要素(代入)、MODULE、業務内容1-10で集計
     
     Parameters:
     -----------
@@ -139,8 +139,8 @@ def aggregate_by_year_month_person(df, effort_col='作業時間(h)'):
         if col in df.columns:
             group_cols.append(col)
     
-    # UNITとMODULEも含める（存在する場合）
-    for col in ['UNIT', 'MODULE']:
+    # WBS要素(代入)とMODULEも含める（存在する場合）
+    for col in [UNIT_COL, 'MODULE']:
         if col in df.columns:
             group_cols.append(col)
     
@@ -286,9 +286,9 @@ def create_plot_data(df, group_cols, effort_col, num_items, sort_column, sort_as
         
         # タイトル作成
         if isinstance(num_items, int) and num_items < len(df):
-            title = f"{sort_direction}{num_items}件の作業時間 ({' / '.join(item_cols)})"
+            title = f"{sort_direction}{num_items}件の作業時間"
         else:
-            title = f"すべての作業時間 ({' / '.join(item_cols)})"
+            title = "すべての作業時間"
         
         return plot_df, title
     except Exception as e:
@@ -350,7 +350,36 @@ def get_available_columns(df):
     for col in BASE_COLUMN_ORDER:
         if col in df.columns:
             available_columns.append(col)
+    # BASE_COLUMN_ORDERにない業務内容Xカラムを番号順に追加
+    already_added = set(available_columns)
+    prefix = '業務内容'
+    extra = sorted(
+        [col for col in df.columns
+         if col.startswith(prefix) and col != prefix and col not in already_added],
+        key=lambda x: int(x[len(prefix):]) if x[len(prefix):].isdigit() else 999
+    )
+    available_columns.extend(extra)
     return available_columns
+
+
+def get_nonempty_business_columns(df, columns):
+    """フィルター後データで全空白の業務内容Xカラムを除外して返す"""
+    if df.empty:
+        return [col for col in columns if not col.startswith('業務内容') or col == '業務内容']
+
+    result = []
+    prefix = '業務内容'
+    for col in columns:
+        if col.startswith(prefix) and col != prefix:
+            if col not in df.columns:
+                continue
+            non_blank = df[col].dropna()
+            non_blank = non_blank[non_blank.astype(str).str.strip() != '']
+            if not non_blank.empty:
+                result.append(col)
+        else:
+            result.append(col)
+    return result
 
 
 def get_unique_values_with_blank(df, column):

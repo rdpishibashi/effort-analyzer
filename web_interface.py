@@ -14,7 +14,8 @@ import io
 from data_merger import process_integrated_workflow
 from analysis_viewer import (
     apply_filters, get_grouping_columns, aggregate_data, sort_aggregated_data,
-    create_plot_data, create_bar_chart, get_available_columns, 
+    create_plot_data, create_bar_chart, get_available_columns,
+    get_nonempty_business_columns,
     get_unique_values_with_blank, format_display_dataframe, get_column_display_order,
     get_date_range_options, aggregate_by_year_month_person, export_aggregated_data_to_excel,
     BLANK_STR, BASE_COLUMN_ORDER, UNIT_COL, EFFORT_COL
@@ -292,42 +293,41 @@ def show_analysis_filters_and_charts(df):
         applied_filters = {}
         date_range_filter = None
         
-        # 日付範囲フィルター
+        # 日付範囲フィルター（スライダー）
         date_options, min_date, max_date = get_date_range_options(df)
         if date_options:
             st.subheader("日付範囲")
-            
-            # 年月の選択肢を文字列として準備
+
             date_str_options = [f"{year}年{month:02d}月" for year, month in date_options]
-            
-            # 開始年月選択
-            start_index = st.selectbox(
-                "開始年月",
-                options=range(len(date_str_options)),
-                format_func=lambda x: date_str_options[x],
-                index=0,
-                key="start_date"
-            )
-            
-            # 終了年月選択
-            end_index = st.selectbox(
-                "終了年月",
-                options=range(len(date_str_options)),
-                format_func=lambda x: date_str_options[x],
-                index=len(date_str_options) - 1,
-                key="end_date"
-            )
-            
-            # 選択された範囲が有効かチェック
-            if start_index <= end_index:
-                start_year_month = date_options[start_index]
-                end_year_month = date_options[end_index]
-                date_range_filter = {
-                    'start': start_year_month,
-                    'end': end_year_month
-                }
+
+            # デフォルト: 直近6ヶ月
+            default_end_idx = len(date_options) - 1
+            default_start_idx = max(0, default_end_idx - 5)
+
+            # データが変わった場合のセッション状態クリア
+            if "date_range_slider" in st.session_state:
+                stored = st.session_state["date_range_slider"]
+                if stored[0] not in date_str_options or stored[1] not in date_str_options:
+                    del st.session_state["date_range_slider"]
+
+            if len(date_str_options) >= 2:
+                selected_range = st.select_slider(
+                    "期間を選択",
+                    options=date_str_options,
+                    value=(date_str_options[default_start_idx], date_str_options[default_end_idx]),
+                    key="date_range_slider"
+                )
+                start_str, end_str = selected_range
             else:
-                st.error("開始年月は終了年月より前の日付を選択してください")
+                start_str = end_str = date_str_options[0]
+                st.write(f"データ期間: {start_str}")
+
+            start_index = date_str_options.index(start_str)
+            end_index = date_str_options.index(end_str)
+            date_range_filter = {
+                'start': date_options[start_index],
+                'end': date_options[end_index]
+            }
         
         st.divider()
         
@@ -342,6 +342,10 @@ def show_analysis_filters_and_charts(df):
             options = get_unique_values_with_blank(filtered_df, col)
             if not options:
                 continue
+
+            # 業務内容カラムで選択肢が[空白]のみの場合は表示しない
+            if col.startswith('業務内容') and col != '業務内容' and set(options) == {BLANK_STR}:
+                continue
             
             selected = st.multiselect(
                 f"{col} で絞り込み",
@@ -355,7 +359,7 @@ def show_analysis_filters_and_charts(df):
                 # 全てのフィルターを適用
                 filtered_df = apply_filters(df.copy(), applied_filters, date_range_filter)
         
-        # UNITフィルター（非カスケード）
+        # WBS要素フィルター（非カスケード）
         if unit_col_exists:
             unit_options = get_unique_values_with_blank(df, UNIT_COL)
             unit_selected = st.multiselect(
@@ -376,7 +380,7 @@ def show_analysis_filters_and_charts(df):
     
     # 年月従業員別集計とエクスポートセクション
     with st.expander("集計データエクスポート"):
-        st.write("フィルター適用後のデータを年・月・従業員名・USER_FIELD_01/02/03・UNIT・MODULE・業務内容で集計してExcelファイルとしてエクスポートできます。")
+        st.write("フィルター適用後のデータを年・月・従業員名・USER_FIELD_01/02/03・WBS要素(代入)・MODULE・業務内容で集計してExcelファイルとしてエクスポートできます。")
         
         if st.button("集計してエクスポート", key="export_aggregated", type="primary"):
             try:
@@ -402,8 +406,11 @@ def show_analysis_filters_and_charts(df):
     
     st.divider()
     
+    # フィルター後に全空白の業務内容カラムを除外
+    active_columns = get_nonempty_business_columns(filtered_df, available_columns)
+
     # グループ化カラム決定
-    group_cols = get_grouping_columns(available_columns, applied_filters)
+    group_cols = get_grouping_columns(active_columns, applied_filters)
     if unit_col_exists and UNIT_COL not in group_cols and UNIT_COL in df.columns:
         group_cols.append(UNIT_COL)
     
@@ -432,7 +439,7 @@ def show_analysis_filters_and_charts(df):
             result_df_display = result_df_sorted[display_columns].copy()
             result_df_display = format_display_dataframe(result_df_display, EFFORT_COL, decimal_places)
             
-            st.dataframe(result_df_display, use_container_width=True, hide_index=True)
+            st.dataframe(result_df_display, width='stretch', hide_index=True)
             
             # グラフ表示
             show_charts(result_df_sorted, group_cols, EFFORT_COL, sort_column, sort_ascending)
@@ -444,9 +451,9 @@ def show_analysis_filters_and_charts(df):
             total_effort = filtered_df[EFFORT_COL].sum()
             st.metric("絞り込み結果の合計作業時間", f"{total_effort:.2f} h")
             
-            # 表示列を決定
-            display_cols = [col for col in available_columns if col in filtered_df.columns]
-            if unit_col_exists and UNIT_COL in filtered_df.columns:
+            # 表示列を決定（全空白業務内容カラム除外済み）
+            display_cols = [col for col in active_columns if col in filtered_df.columns]
+            if unit_col_exists and UNIT_COL in filtered_df.columns and UNIT_COL not in display_cols:
                 display_cols.append(UNIT_COL)
             if EFFORT_COL in filtered_df.columns:
                 display_cols.append(EFFORT_COL)
@@ -476,7 +483,7 @@ def show_charts(df, group_cols, effort_col, sort_column, sort_ascending):
             fig = create_bar_chart(plot_df, title, effort_col, graph_type)
             
             if fig is not None:
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.error("グラフの作成に失敗しました")
         else:
@@ -509,7 +516,7 @@ def show_usage_info():
            - ローカルファイル: merged_efforts.xlsx
         2. **フィルター機能**: 
            - カスケードフィルター: 上位フィルターが下位に影響
-           - UNITフィルター: 独立したAND条件
+           - WBS要素フィルター: 独立したAND条件
         3. **集計とグラフ**: 
            - 自動集計とソート
            - 横棒/縦棒グラフ選択
@@ -541,12 +548,12 @@ def show_main_tabs():
     # タブ切り替えボタン
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Job Organizer", use_container_width=True, 
+        if st.button("Job Organizer", width='stretch',
                     type="primary" if st.session_state.current_tab == "organizer" else "secondary"):
             st.session_state.current_tab = "organizer"
             st.rerun()
     with col2:
-        if st.button("Analysis Viewer", use_container_width=True,
+        if st.button("Analysis Viewer", width='stretch',
                     type="primary" if st.session_state.current_tab == "analysis" else "secondary"):
             st.session_state.current_tab = "analysis"
             st.rerun()

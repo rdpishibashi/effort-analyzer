@@ -40,8 +40,8 @@ def main():
     )
     
     # メインタイトル
-    st.title("📊 統合工数分析ビューア")
-    st.markdown("**Job Organizer** と **Analysis Viewer** の統合アプリケーション")
+    st.title("工数分析ツール")
+    st.markdown("月別工数の統合と工数分析ツール")
     
     # セッション状態初期化
     if 'latest_processed_data' not in st.session_state:
